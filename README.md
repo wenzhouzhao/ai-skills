@@ -18,6 +18,11 @@ ai-skills/
 │   ├── codex.md              # Codex 入口
 │   ├── scripts/              # Node.js 辅助脚本
 │   └── references/           # 参考文档
+├── ishot-security-audit/     # iShot 付费水印安全审计
+│   ├── SKILL.md              # Claude Code 入口
+│   ├── codex.md              # Codex 入口
+│   ├── ishot_security_tester.py  # 核心攻击脚本
+│   └── references/           # 审计报告
 └── (更多 skills...)
 ```
 
@@ -39,6 +44,14 @@ python3 html-format/format.py .
 
 > 📌 来源：https://github.com/Jane-xiaoer/claude-skill-web-clone （已获授权，MIT License）
 
+### ishot-security-audit
+
+iShot 付费水印安全审计与绕过复现。ARM64 二进制 CBZ→B patch 攻击、Plist 篡改分析、重签名与权限重置。
+
+```bash
+sudo python3 ishot-security-audit/ishot_security_tester.py auto
+```
+
 ## 安装方式
 
 ### Claude Code
@@ -47,6 +60,7 @@ python3 html-format/format.py .
 # 符号链接（推荐，可同步更新）
 ln -s $(pwd)/html-format ~/.claude/skills/html-format
 ln -s $(pwd)/web-clone ~/.claude/skills/web-clone
+ln -s $(pwd)/ishot-security-audit ~/.claude/skills/ishot-security-audit
 ```
 
 ### Codex (OpenAI)
@@ -55,6 +69,7 @@ ln -s $(pwd)/web-clone ~/.claude/skills/web-clone
 mkdir -p <你的项目>/.codex/commands/
 cp html-format/codex.md <你的项目>/.codex/commands/html-format.md
 cp web-clone/codex.md <你的项目>/.codex/commands/web-clone.md
+cp ishot-security-audit/codex.md <你的项目>/.codex/commands/ishot-security-audit.md
 ```
 
 ## 开发新 Skill
