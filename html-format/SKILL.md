@@ -6,8 +6,8 @@ description: >
   自动识别文件类型（web-clone JSON 包装 / SingleFile / 普通 minified / DOM 序列化），
   选择最优策略格式化。
 metadata:
-  version: "2.1.0"
-  use_case: 格式化任何单行/压缩的 HTML 文件，并抽离内联 base64 图片/字体
+  version: "2.2.0"
+  use_case: 格式化任何单行/压缩的 HTML 文件，并抽离内联 base64 图片/字体（语义命名）
 ---
 
 # HTML Format · HTML 格式化
@@ -44,15 +44,33 @@ python3 <本skill目录>/format.py a.html b.html
 
 - **图片** → `images/` 子目录（扩展名按 MIME 推断：png/jpg/webp/ico/svg/gif/avif/bmp/tif…）
 - **字体** → `fonts/` 子目录（woff2/woff/ttf/otf/sfnt…）
-- HTML 内的 `data:` URI 被替换为相对路径（如 `images/01_0001.png`）
+- HTML 内的 `data:` URI 被替换为相对路径
 - 按内容 `sha256` 在同一目录内**去重**（相同资源只存一份）
 - 序号从目录内已有文件的最大序号**续接**，可安全重复运行、不覆盖已有资源
 - 没有任何内联 base64 的文件会被直接跳过，不额外写盘
+
+### 文件名：默认按上下文语义命名（v2.2.0）
+
+抽取出的文件名**默认根据上下文含义生成**，而非随机/无意义序号。脚本按以下
+优先级从资源所在位置推断命名线索：
+
+1. `<img alt="...">` 的 **alt 文本**（最贴近图片含义，支持中文）
+2. 元素的 **id** 属性
+3. 元素的 **class** 属性（取第一个 class 词）
+4. `<link rel="...">` 的 **rel** → 固定可读名：`icon`→`favicon`、`apple-touch-icon`→`apple-touch-icon`、`mask-icon`→`mask-icon`
+5. 位于 `<style>` 内 `background-image: url(data:...)` 时，取 **CSS 选择器**（如 `.hero-banner`）
+
+推断不到时回退为 `源文件前缀_序号`（如 `01_0003.png`）。示例输出：
+`favicon.ico`、`apple-touch-icon.png`、`网站主logo.png`、`avatar-img.png`、
+`hero-banner.webp`、`stylesheet.woff2`。
+
+> 想退回纯序号命名（确定性、便于复现旧输出），加 `--sequential`：
+> `python3 format.py --sequential .`
 
 > 说明：未加引号的属性（如 `<link rel=icon href=data:...>`）也能正确抽取，
 > 正则已规避把后续属性（`sizes=`/`rel=`）误吞为 base64 的历史问题。
 
 ## 依赖
 
-- Python 3（标准库，base64 抽离无需第三方库）
+- Python 3（标准库，base64 抽离/语义命名无需第三方库）
 - Node.js + prettier（Type A/C/D 格式化需要，npx 自动下载）

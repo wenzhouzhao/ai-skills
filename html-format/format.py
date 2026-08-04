@@ -2,14 +2,18 @@
 """
 HTML Format - 单行 HTML 格式化工具
 支持: web-clone JSON包装 / SingleFile base64 / 普通minified / DOM序列化
-用法: python3 format.py [目录路径|文件路径...]
+用法: python3 format.py [选项] [目录路径|文件路径...]
       python3 format.py .                    # 当前目录下所有 .html
       python3 format.py /path/to/dir         # 指定目录下所有 .html
       python3 format.py a.html b.html        # 指定文件
+      python3 format.py --sequential .       # 关闭语义命名，退回纯序号命名
 
 附加能力 (v2.1.0): 自动把 HTML 内联的 base64 图片/字体抽离为独立文件
 (images/ 与 fonts/ 子目录)，并把 HTML 中的 data URI 替换为相对路径引用，
-大幅减小 HTML 体积。按内容 sha256 跨文件去重，支持重跑续接。
+大幅减小 HTML 体积。
+  文件名默认按上下文语义命名: <img alt> → id/class → rel(icon等) → CSS选择器；
+  推断不到时回退为 源文件前缀_序号。可用 --sequential 强制纯序号命名。
+  同一目录内按内容 sha256 去重，序号从已有文件最大序号续接，可安全重跑。
 """
 
 import json, re, glob, subprocess, sys, os, base64, hashlib
@@ -30,7 +34,7 @@ BLOCK_CLOSE = ['</html>', '</head>', '</body>', '</div>', '</nav>', '</section>'
 BLOCK_OPEN = ['<div', '<nav', '<section', '<header', '<footer', '<main',
     '<article', '<aside', '<table', '<ul', '<ol', '<li', '<form',
     '<script', '<template', '<select', '<noscript', '<iframe',
-    '<h1', '<h2', '<h3', '<h4', '<h5', '<h6', '<p', '<title',
+    '<h1', '<h2', '<h3', '<h4', '<h5', '<h6', '<p', '<title>',
     '<head', '<body', '<meta', '<link', '<br', '<hr', '<input',
     '<style', '<a ', '<img ', '<button', '<label', '<option',
     '<tr', '<td', '<th', '<thead', '<tbody', '<tfoot', '<colgroup',
@@ -148,6 +152,9 @@ _B64_FONT_EXT = {
     'otf': 'otf', 'ttf': 'ttf', 'sfnt': 'sfnt',
 }
 
+# HTML 标签属性解析 (name="v" / name='v' / name=v)
+_ATTR_RE = re.compile(r'(\w[\w-]*)\s*=\s*("([^"]*)"|\'([^\']*)\'|([^\s>]+))', re.I)
+
 
 def _b64_max_index(d):
     """扫描目录中已有 _NNNN 序号，返回最大序号（重跑续接用）"""
@@ -184,15 +191,101 @@ def _b64_try_decode(raw):
         return None
 
 
-def extract_base64_assets(files):
+# ---- 语义命名 (v2.1.0) -------------------------------------------------------
+
+def _slugify(hint):
+    """把上下文线索清洗为安全文件名片段（小写、限长 40）。
+
+    保留字母/数字/下划线/中日韩汉字与连字符；其余（空格、/、:、. 等）统一
+    替换为连字符。空结果返回 ''（调用方回退到序号命名）。
+    """
+    s = (hint or '').strip()
+    if not s:
+        return ''
+    # 去掉 CSS 选择器等场景里无意义的引号/括号
+    s = re.sub(r'[^\w\u3400-\u9fff\-]+', '-', s)
+    s = re.sub(r'-{2,}', '-', s).strip('-')
+    if len(s) > 40:
+        s = s[:40].rstrip('-')
+    return s.lower()
+
+
+def _rel_friendly(rel):
+    """把 rel 属性映射为可读的语义名。"""
+    r = (rel or '').lower()
+    if 'apple-touch-icon' in r:
+        return 'apple-touch-icon'
+    if 'mask-icon' in r:
+        return 'mask-icon'
+    if 'icon' in r:
+        return 'favicon'
+    return re.sub(r'\s+', '-', r) or 'icon'
+
+
+def _html_attr_hint(html, pos):
+    """从包含 pos 的 HTML 标签属性推断命名线索: alt > id > class > rel。"""
+    tag_open = html.rfind('<', 0, pos)
+    if tag_open == -1:
+        return None
+    tag_close = html.find('>', pos)
+    if tag_close == -1:
+        return None
+    tag = html[tag_open:tag_close + 1]
+    attrs = {}
+    for mm in _ATTR_RE.finditer(tag):
+        key = mm.group(1).lower()
+        val = mm.group(3) or mm.group(4) or mm.group(5) or ''
+        attrs[key] = val
+    if attrs.get('alt', '').strip():
+        return attrs['alt'].strip()
+    if attrs.get('id', '').strip():
+        return attrs['id'].strip()
+    if attrs.get('class', '').strip():
+        return attrs['class'].split()[0]  # 取第一个 class
+    if attrs.get('rel', '').strip():
+        return _rel_friendly(attrs['rel'])
+    return None
+
+
+def _css_selector_hint(html, pos):
+    """若 pos 处于 <style> 块内的 background-image: url(data:...)，取 CSS 选择器。"""
+    style_open = html.rfind('<style', 0, pos)
+    if style_open == -1:
+        return None
+    style_close = html.find('</style>', pos)
+    if style_close != -1 and pos > style_close:
+        return None  # pos 不在该 <style> 内
+    brace = html.rfind('{', 0, pos)
+    if brace == -1 or brace < style_open:
+        return None
+    style_tag_close = html.find('>', style_open)
+    if style_tag_close == -1 or brace <= style_tag_close:
+        return None
+    prev = html.rfind('}', style_tag_close, brace)
+    start = prev + 1 if prev != -1 else style_tag_close + 1
+    sel = html[start:brace]
+    sel = re.sub(r'/\*.*?\*/', '', sel, flags=re.S)  # 去 CSS 注释
+    return sel.strip() or None
+
+
+def guess_name(html, pos):
+    """综合上下文推断语义文件名（不保证非空）。"""
+    hint = _html_attr_hint(html, pos)
+    if hint:
+        return hint
+    return _css_selector_hint(html, pos)
+
+
+def extract_base64_assets(files, semantic=True):
     """抽离所有 HTML 中的 base64 图片/字体为独立文件并替换引用。
 
     按每个 HTML 文件所在目录创建 images/ 与 fonts/ 子目录；引用使用相对路径。
     同一目录内按内容 sha256 去重（共享同一份文件）；counter 从已有文件最大
     序号续接，因此可安全重跑、不会覆盖已抽取资源。
+    semantic=True 时文件名优先按上下文语义命名（alt>id/class>rel>CSS选择器），
+    推断不到再回退 源前缀_序号；semantic=False 直接纯序号命名。
     没有任何内联 base64 的文件会被直接跳过，不做多余写盘。
     """
-    # 按目录分组，避免不同目录间错误地引用彼此的资源
     by_dir = {}
     for fname in files:
         d = os.path.dirname(os.path.abspath(fname))
@@ -209,7 +302,8 @@ def extract_base64_assets(files):
         os.makedirs(font_dir, exist_ok=True)
         counter = {'images': _b64_max_index(img_dir),
                    'fonts': _b64_max_index(font_dir)}
-        seen = {}  # hash -> 相对路径（本目录内去重）
+        seen = {}        # hash -> 相对路径（本目录内去重）
+        used = set()     # 已占用文件名（去重碰撞处理）
 
         for fname in flist:
             with open(fname, encoding='utf-8', errors='replace') as f:
@@ -217,6 +311,7 @@ def extract_base64_assets(files):
             if _B64_PATTERN.search(html) is None:
                 continue  # 无内联 base64，跳过
 
+            prefix = os.path.splitext(os.path.basename(fname))[0]
             orig = len(html.encode('utf-8'))
             parts = []
             last = 0
@@ -238,10 +333,23 @@ def extract_base64_assets(files):
                 if h in seen:
                     rel = seen[h]
                 else:
-                    counter[category] += 1
-                    created[category] += 1
-                    prefix = os.path.splitext(os.path.basename(fname))[0]
-                    rel = f"{category}/{prefix}_{counter[category]:04d}.{ext}"
+                    rel = None
+                    if semantic:
+                        hint = guess_name(html, m.start())
+                        slug = _slugify(hint) if hint else ''
+                        if slug:
+                            base = slug
+                            cand = f"{base}.{ext}"
+                            if cand in used:
+                                i = 2
+                                while f"{base}-{i}.{ext}" in used:
+                                    i += 1
+                                base = f"{base}-{i}"
+                            rel = f"{category}/{base}.{ext}"
+                            used.add(f"{base}.{ext}")
+                    if rel is None:  # 回退 / 强制序号
+                        counter[category] += 1
+                        rel = f"{category}/{prefix}_{counter[category]:04d}.{ext}"
                     with open(os.path.join(base_dir, rel), 'wb') as out:
                         out.write(data)
                     seen[h] = rel
@@ -266,7 +374,8 @@ def extract_base64_assets(files):
                   f"(新图片 {created['images']}, 新字体 {created['fonts']})")
 
     if grand_replaced:
-        print(f"\n📊 base64 抽离合计: 替换 {grand_replaced} 处")
+        mode = '语义' if semantic else '序号'
+        print(f"\n📊 base64 抽离合计({mode}命名): 替换 {grand_replaced} 处")
         print(f"   图片: {grand_created['images']} 个新文件, "
               f"{grand_bytes['images']/1024/1024:.2f} MB")
         print(f"   字体: {grand_created['fonts']} 个新文件, "
@@ -289,7 +398,7 @@ def try_prettier(files_to_format):
         return False
 
 
-def format_files(targets):
+def format_files(targets, semantic=True):
     """主入口：格式化所有目标 HTML 文件"""
     files = collect_files(targets)
     if not files:
@@ -358,7 +467,7 @@ def format_files(targets):
 
     # Phase 8: 抽离内联 base64 图片/字体 → 独立文件并替换引用
     print('\n🖼️  抽离内联 base64 资源...')
-    extract_base64_assets(files)
+    extract_base64_assets(files, semantic=semantic)
 
     # 输出结果
     print('\n=== 格式化完成 ===')
@@ -371,10 +480,19 @@ def format_files(targets):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print('Usage: python3 format.py <directory|file.html> [...]')
-        print('  python3 format.py .              # 当前目录所有 .html')
-        print('  python3 format.py /path/to/dir   # 指定目录')
-        print('  python3 format.py a.html b.html  # 指定文件')
+    args = sys.argv[1:]
+    semantic = True
+    if '--sequential' in args:
+        semantic = False
+        args.remove('--sequential')
+    if '--no-context' in args:
+        semantic = False
+        args.remove('--no-context')
+    if not args:
+        print('Usage: python3 format.py [--sequential] <directory|file.html> [...]')
+        print('  python3 format.py .                  # 当前目录所有 .html')
+        print('  python3 format.py /path/to/dir       # 指定目录')
+        print('  python3 format.py a.html b.html      # 指定文件')
+        print('  python3 format.py --sequential .     # 关闭语义命名，纯序号')
         sys.exit(1)
-    format_files(sys.argv[1:])
+    format_files(args, semantic=semantic)

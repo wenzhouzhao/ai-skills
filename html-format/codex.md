@@ -54,3 +54,7 @@ python3 /path/to/ai-skills/html-format/format.py /path/to/dir
 - Extraction dedupes by content hash (sha256) within each directory, and continues
   numbering from existing files, so re-running is safe and won't overwrite assets
 - Files with no inline base64 are skipped (no unnecessary writes)
+- **Semantic filenames (default):** extracted assets are named from context —
+  `<img alt>` → `id`/`class` → `rel` (icon→favicon, apple-touch-icon, etc.) →
+  CSS selector (for `background-image`). Falls back to `<prefix>_NNNN` when no
+  context is available. Pass `--sequential` to force plain `<prefix>_NNNN` naming.
