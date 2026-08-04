@@ -353,6 +353,8 @@ def extract_base64_assets(files, semantic=True):
                     with open(os.path.join(base_dir, rel), 'wb') as out:
                         out.write(data)
                     seen[h] = rel
+                    created[category] += 1
+                    grand_created[category] += 1
                     grand_bytes[category] += len(data)
 
                 parts.append(html[last:m.start()])
@@ -367,8 +369,6 @@ def extract_base64_assets(files, semantic=True):
 
             new = len(new_html.encode('utf-8'))
             grand_replaced += replaced
-            grand_created['images'] += created['images']
-            grand_created['fonts'] += created['fonts']
             print(f"🖼️  {os.path.basename(fname)}: {orig:,} → {new:,} bytes "
                   f"(−{orig - new:,}) | 替换 {replaced} 处 "
                   f"(新图片 {created['images']}, 新字体 {created['fonts']})")
