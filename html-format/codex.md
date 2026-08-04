@@ -48,4 +48,9 @@ python3 /path/to/ai-skills/html-format/format.py /path/to/dir
 
 - Always run `format.py` — don't try to replicate its logic inline
 - If prettier fails on a file, the script auto-falls back to Python formatting
-- SingleFile (Type B) inline base64 blocks remain as long lines (inherent format limitation)
+- SingleFile (Type B) inline base64 blocks are automatically extracted to
+  standalone `images/` and `fonts/` files, and the `data:` URIs are replaced
+  with relative paths — this shrinks the HTML dramatically and keeps page rendering intact
+- Extraction dedupes by content hash (sha256) within each directory, and continues
+  numbering from existing files, so re-running is safe and won't overwrite assets
+- Files with no inline base64 are skipped (no unnecessary writes)
