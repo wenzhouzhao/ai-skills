@@ -6,7 +6,7 @@ description: >
   自动识别文件类型（web-clone JSON 包装 / SingleFile / 普通 minified / DOM 序列化），
   选择最优策略格式化。
 metadata:
-  version: "2.2.0"
+  version: "2.3.0"
   use_case: 格式化任何单行/压缩的 HTML 文件，并抽离内联 base64 图片/字体（语义命名）
 ---
 
@@ -59,10 +59,13 @@ python3 <本skill目录>/format.py a.html b.html
 3. 元素的 **class** 属性（取第一个 class 词）
 4. `<link rel="...">` 的 **rel** → 固定可读名：`icon`→`favicon`、`apple-touch-icon`→`apple-touch-icon`、`mask-icon`→`mask-icon`
 5. 位于 `<style>` 内 `background-image: url(data:...)` 时，取 **CSS 选择器**（如 `.hero-banner`）
+6. `@font-face` 块内的字体，取 **font-family + font-weight/style**
+   （如 `noto-sans-tc-100.woff2`，而不是无信息量的 `font-face.woff2`）
 
-推断不到时回退为 `源文件前缀_序号`（如 `01_0003.png`）。示例输出：
+推断不到时回退为 `源文件前缀_序号`（如 `01_0003.png`）。同目录内同名不同内容
+自动追加 `-2`/`-3` 后缀。示例输出：
 `favicon.ico`、`apple-touch-icon.png`、`网站主logo.png`、`avatar-img.png`、
-`hero-banner.webp`、`stylesheet.woff2`。
+`hero-banner.webp`、`noto-sans-tc-100-3.woff2`。
 
 > 想退回纯序号命名（确定性、便于复现旧输出），加 `--sequential`：
 > `python3 format.py --sequential .`
@@ -70,7 +73,24 @@ python3 <本skill目录>/format.py a.html b.html
 > 说明：未加引号的属性（如 `<link rel=icon href=data:...>`）也能正确抽取，
 > 正则已规避把后续属性（`sizes=`/`rel=`）误吞为 base64 的历史问题。
 
+## prettier 的定位方式（v2.3.0）
+
+Type A/C/D 需要 prettier。脚本**不再直接调用 `npx prettier`**——npx 每次都会
+向 registry 解析最新版本，本机缓存里即使已有 prettier 也会因版本号不同重新下载，
+离线/弱网时会长时间挂起甚至被系统杀掉，导致格式化整体失败。
+
+改为按以下顺序探测（`--version` 能跑通即采用）：
+
+1. 环境变量 `PRETTIER_BIN`（显式指定，优先级最高）
+2. 当前目录 `node_modules/.bin/prettier`（项目本地依赖）
+3. `PATH` 上的全局 `prettier`
+4. npx 缓存中已下载的 prettier（`~/.npm/_npx/*/node_modules/prettier`，离线可用）
+5. `npx --yes prettier`（联网下载，最后兜底）
+
+运行时会打印实际使用的 prettier 路径。全部不可用时会给出明确提示，并自动
+回退到纯 Python 结构化格式化（不会中断，只是排版略粗）。
+
 ## 依赖
 
 - Python 3（标准库，base64 抽离/语义命名无需第三方库）
-- Node.js + prettier（Type A/C/D 格式化需要，npx 自动下载）
+- Node.js + prettier（仅 Type A/C/D 需要；按上述顺序定位，离线也能用缓存版本）

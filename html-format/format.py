@@ -16,7 +16,7 @@ HTML Format - 单行 HTML 格式化工具
   同一目录内按内容 sha256 去重，序号从已有文件最大序号续接，可安全重跑。
 """
 
-import json, re, glob, subprocess, sys, os, base64, hashlib
+import json, re, glob, subprocess, sys, os, base64, hashlib, shutil
 
 VOID_ELEMENTS = ['meta', 'img', 'link', 'br', 'hr', 'input', 'source',
                  'embed', 'area', 'base', 'col', 'track', 'wbr']
@@ -247,6 +247,28 @@ def _html_attr_hint(html, pos):
     return None
 
 
+def _font_face_hint(html, brace, pos):
+    """@font-face 块内的字体 → 用 font-family(+weight/style) 命名。
+
+    形如 @font-face{font-family:"Noto Sans TC";font-weight:100;src:url(data:...)}
+    直接拿 '@font-face' 当名字毫无信息量，改成 noto-sans-tc-100 更可读。
+    """
+    decl = html[brace + 1:pos]
+    fam = re.search(r'font-family\s*:\s*(["\']?)([^"\';}]+)\1', decl)
+    if not fam:
+        return None
+    name = fam.group(2).strip()
+    if not name:
+        return None
+    w = re.search(r'font-weight\s*:\s*([^;}]+)', decl)
+    if w and w.group(1).strip().lower() not in ('', 'normal'):
+        name += '-' + w.group(1).strip()
+    s = re.search(r'font-style\s*:\s*([^;}]+)', decl)
+    if s and s.group(1).strip().lower() not in ('', 'normal'):
+        name += '-' + s.group(1).strip()
+    return name
+
+
 def _css_selector_hint(html, pos):
     """若 pos 处于 <style> 块内的 background-image: url(data:...)，取 CSS 选择器。"""
     style_open = html.rfind('<style', 0, pos)
@@ -265,7 +287,12 @@ def _css_selector_hint(html, pos):
     start = prev + 1 if prev != -1 else style_tag_close + 1
     sel = html[start:brace]
     sel = re.sub(r'/\*.*?\*/', '', sel, flags=re.S)  # 去 CSS 注释
-    return sel.strip() or None
+    sel = sel.strip()
+    if not sel:
+        return None
+    if '@font-face' in sel:
+        return _font_face_hint(html, brace, pos) or sel
+    return sel
 
 
 def guess_name(html, pos):
@@ -298,8 +325,8 @@ def extract_base64_assets(files, semantic=True):
     for base_dir, flist in by_dir.items():
         img_dir = os.path.join(base_dir, 'images')
         font_dir = os.path.join(base_dir, 'fonts')
-        os.makedirs(img_dir, exist_ok=True)
-        os.makedirs(font_dir, exist_ok=True)
+        # 目录延迟创建：只有真的要写入该类资源时才 mkdir，
+        # 避免在没有字体的站点里留下一个空 fonts/ 目录。
         counter = {'images': _b64_max_index(img_dir),
                    'fonts': _b64_max_index(font_dir)}
         seen = {}        # hash -> 相对路径（本目录内去重）
@@ -350,7 +377,9 @@ def extract_base64_assets(files, semantic=True):
                     if rel is None:  # 回退 / 强制序号
                         counter[category] += 1
                         rel = f"{category}/{prefix}_{counter[category]:04d}.{ext}"
-                    with open(os.path.join(base_dir, rel), 'wb') as out:
+                    out_path = os.path.join(base_dir, rel)
+                    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                    with open(out_path, 'wb') as out:
                         out.write(data)
                     seen[h] = rel
                     created[category] += 1
@@ -386,15 +415,88 @@ def extract_base64_assets(files, semantic=True):
 
 # ---- 主流程 -----------------------------------------------------------------
 
+_PRETTIER_CMD = None
+_PRETTIER_RESOLVED = False
+
+
+def _prettier_probe(cmd):
+    """探测候选命令是否可真正执行（--version 返回 0）"""
+    try:
+        r = subprocess.run(cmd + ['--version'],
+                           capture_output=True, text=True, timeout=60)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def resolve_prettier():
+    """按优先级定位可用的 prettier，返回命令前缀 list；都不可用返回 None。
+
+    顺序：
+      1. 环境变量 PRETTIER_BIN（用户显式指定）
+      2. 当前目录 node_modules/.bin/prettier（项目本地依赖）
+      3. PATH 上的全局 prettier
+      4. npx 缓存中已下载的 prettier（离线可用）
+      5. npx --yes prettier（联网下载，最后兜底）
+
+    为什么不直接用 `npx prettier`：npx 每次都会向 registry 解析最新版本，
+    缓存里即便有 prettier 也会因版本号不同而重新下载；离线或弱网环境下
+    会长时间挂起甚至被系统杀掉，导致格式化整体失败。
+    """
+    global _PRETTIER_CMD, _PRETTIER_RESOLVED
+    if _PRETTIER_RESOLVED:
+        return _PRETTIER_CMD
+    _PRETTIER_RESOLVED = True
+
+    node = shutil.which('node') or 'node'
+    candidates = []
+
+    env_bin = os.environ.get('PRETTIER_BIN')
+    if env_bin:
+        candidates.append([env_bin])
+
+    local = os.path.join(os.getcwd(), 'node_modules', '.bin', 'prettier')
+    if os.path.isfile(local):
+        candidates.append([local])
+
+    global_bin = shutil.which('prettier')
+    if global_bin:
+        candidates.append([global_bin])
+
+    for cached in sorted(glob.glob(os.path.expanduser(
+            '~/.npm/_npx/*/node_modules/prettier/bin/prettier.cjs')), reverse=True):
+        candidates.append([node, cached])
+
+    candidates.append(['npx', '--yes', 'prettier'])
+
+    for cmd in candidates:
+        if _prettier_probe(cmd):
+            _PRETTIER_CMD = cmd
+            return cmd
+    return None
+
+
 def try_prettier(files_to_format):
     """尝试 prettier 格式化，成功返回 True"""
+    cmd = resolve_prettier()
+    if cmd is None:
+        print('   ⚠️ 未找到可用的 prettier '
+              '(已尝试 PRETTIER_BIN / node_modules/.bin / PATH / npx缓存 / npx)')
+        return False
+    shown = cmd[-1] if len(cmd) > 1 else cmd[0]
+    print(f'   使用 prettier: {shown}')
     try:
         result = subprocess.run(
-            ['npx', 'prettier', '--write', '--parser', 'html',
-             '--print-width', '120'] + files_to_format,
-            capture_output=True, text=True, timeout=120)
+            cmd + ['--write', '--parser', 'html',
+                   '--print-width', '120'] + files_to_format,
+            capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            msg = (result.stderr or result.stdout or '').strip().splitlines()
+            if msg:
+                print(f'   prettier 报错: {msg[-1][:200]}')
         return result.returncode == 0
-    except Exception:
+    except Exception as e:
+        print(f'   prettier 调用异常: {type(e).__name__}: {e}')
         return False
 
 
@@ -475,7 +577,8 @@ def format_files(targets, semantic=True):
         with open(fname, 'r') as f:
             content = f.read()
         lines = content.count('\n') + 1
-        size = len(content)
+        # 用 UTF-8 字节数，与抽离阶段的口径一致（中文按字符数会明显偏小）
+        size = len(content.encode('utf-8'))
         print(f'  {os.path.basename(fname)}: {lines:,} lines, {size:,} bytes')
 
 

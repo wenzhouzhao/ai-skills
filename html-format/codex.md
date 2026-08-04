@@ -42,7 +42,9 @@ python3 /path/to/ai-skills/html-format/format.py /path/to/dir
 ## Requirements
 
 - Python 3 (stdlib only)
-- Node.js + prettier (auto-downloaded via npx for types A/C/D)
+- Node.js + prettier (types A/C/D only; resolved from `PRETTIER_BIN` →
+  `node_modules/.bin/prettier` → global `prettier` → npx cache → `npx --yes prettier`,
+  so it also works offline when a cached copy exists)
 
 ## Notes
 
@@ -56,5 +58,13 @@ python3 /path/to/ai-skills/html-format/format.py /path/to/dir
 - Files with no inline base64 are skipped (no unnecessary writes)
 - **Semantic filenames (default):** extracted assets are named from context —
   `<img alt>` → `id`/`class` → `rel` (icon→favicon, apple-touch-icon, etc.) →
-  CSS selector (for `background-image`). Falls back to `<prefix>_NNNN` when no
-  context is available. Pass `--sequential` to force plain `<prefix>_NNNN` naming.
+  CSS selector (for `background-image`) → `font-family`+weight inside `@font-face`
+  (e.g. `noto-sans-tc-100.woff2`). Falls back to `<prefix>_NNNN` when no context is
+  available; same-name/different-content gets a `-2`/`-3` suffix.
+  Pass `--sequential` to force plain `<prefix>_NNNN` naming.
+- `images/` and `fonts/` directories are created lazily — a site with no fonts
+  won't get an empty `fonts/` directory
+- **Never rely on bare `npx prettier`**: npx re-resolves the latest version from the
+  registry on every run, so a cached prettier gets re-downloaded and the command
+  hangs (or is killed) offline. `resolve_prettier()` handles this; the chosen
+  prettier path is printed at runtime.
