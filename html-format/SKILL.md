@@ -6,8 +6,8 @@ description: >
   自动识别文件类型（web-clone JSON 包装 / SingleFile / 普通 minified / DOM 序列化），
   选择最优策略格式化。
 metadata:
-  version: "2.3.0"
-  use_case: 格式化任何单行/压缩的 HTML 文件，并抽离内联 base64 图片/字体（语义命名）
+  version: "2.4.0"
+  use_case: 格式化任何单行/压缩的 HTML 文件，并抽离内联 base64 图片/字体（语义命名）与内联 <style> CSS（独立 .css 文件）
 ---
 
 # HTML Format · HTML 格式化
@@ -72,6 +72,37 @@ python3 <本skill目录>/format.py a.html b.html
 
 > 说明：未加引号的属性（如 `<link rel=icon href=data:...>`）也能正确抽取，
 > 正则已规避把后续属性（`sizes=`/`rel=`）误吞为 base64 的历史问题。
+
+## 内联 CSS 抽离（v2.4.0 新增，需 `--extract-css` 开启）
+
+默认**不抽取**（base64 抽离仍是默认主流程）。加 `--extract-css` 时，会在
+base64 抽离之后，把 HTML 内联的 `<style>` 样式抽成独立 `.css` 文件，并在原处
+插入 `<link rel="stylesheet" href="...">` 引用，从而让 HTML 进一步瘦身、样式
+便于复用。在 yuurewards SingleClone 三文件上实测：HTML 由 600KB 缩到 ~42KB
+（↓93%），跨文件去重后再净省 ~159KB。
+
+关键设计（均已在真实 SingleFile 页面验证）：
+
+- **srcdoc 安全**：`<iframe srcdoc="...">` 属性值里内嵌的 `<style>` 属于 iframe
+  自身文档，绝不当作当前页面样式抽出（否则会破坏 iframe 渲染）。扫描时跳过
+  srcdoc 覆盖区间。
+- **跳过运行时 CSS**：带 `data-emotion` / `data-styled` 等属性的 `<style>`（常由
+  JS 注入/替换）保留原位不抽，避免破坏交互。
+- **跨文件去重**：每个块内容按 sha256 计算；出现在多个文件的共享块只写一份
+  `shared-<sha12>.css`，被各 HTML 以 `<link>` 引用。仅当前文件独有的块写成
+  `<stem>-<n>.css`。
+- **路径零风险**：默认 `.css` 与 HTML **同级**，块内 `url(images/|fonts/)` 原样
+  有效；若用 `--css-dir css` 指定子目录，则自动把 css 内 `url(images|fonts)`
+  改写为 `../images/`、`../fonts/`（已验证改写后路径真实可达）。
+- **顺序保持**：按原文档顺序生成 `<link>`，CSS 层叠顺序不变。
+- 块内若含 `url(data:image/svg+xml,...)`（URL 编码的内联 SVG）会原样保留在
+  `.css` 中，不受影响。
+
+```bash
+python3 format.py --extract-css .                 # 抽到同级 .css（推荐）
+python3 format.py --extract-css --css-dir css .   # 抽到 css/ 子目录并改写 url()
+python3 format.py --extract-css --no-css-dedup .  # 关闭跨文件去重，每块独立成文件
+```
 
 ## prettier 的定位方式（v2.3.0）
 

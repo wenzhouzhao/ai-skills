@@ -64,6 +64,15 @@ python3 /path/to/ai-skills/html-format/format.py /path/to/dir
   Pass `--sequential` to force plain `<prefix>_NNNN` naming.
 - `images/` and `fonts/` directories are created lazily — a site with no fonts
   won't get an empty `fonts/` directory
+- **Inline CSS extraction (`--extract-css`, off by default):** when passed, the
+  script also pulls each inline `<style>` out into a standalone `.css` file and
+  replaces it with a `<link rel="stylesheet">`. Shared blocks (same sha256 across
+  files) are written once as `shared-<sha12>.css` and referenced by every file;
+  file-unique blocks become `<stem>-<n>.css`. `<iframe srcdoc>`-embedded styles
+  are never extracted, and `data-emotion`/`data-styled` runtime-CSS blocks are left
+  inline. By default `.css` files sit next to the HTML (so `url(images/|fonts/)`
+  keeps working); `--css-dir css` moves them into a subdir and rewrites those
+  `url()` paths to `../images/`, `../fonts/`.
 - **Never rely on bare `npx prettier`**: npx re-resolves the latest version from the
   registry on every run, so a cached prettier gets re-downloaded and the command
   hangs (or is killed) offline. `resolve_prettier()` handles this; the chosen

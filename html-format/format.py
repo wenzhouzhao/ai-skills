@@ -14,6 +14,15 @@ HTML Format - 单行 HTML 格式化工具
   文件名默认按上下文语义命名: <img alt> → id/class → rel(icon等) → CSS选择器；
   推断不到时回退为 源文件前缀_序号。可用 --sequential 强制纯序号命名。
   同一目录内按内容 sha256 去重，序号从已有文件最大序号续接，可安全重跑。
+
+附加能力 (v2.4.0): 把 HTML 内联的 <style> 样式抽离为独立 .css 文件并替换为
+<link rel="stylesheet"> 引用，从而进一步缩小 HTML 体积、便于样式复用。
+  默认关闭，需显式加 --extract-css 才执行（base64 抽离仍是默认主流程）。
+  用 html.parser 同源思路的 srcdoc 安全扫描：iframe srcdoc 属性值内嵌的
+  <style> 不算文档级样式，绝不误抽；带 data-emotion 等运行时 CSS 的属性
+  的 <style> 保留原位不抽。块内容按 sha256 跨文件去重，共享块只存一份被多个
+  HTML 引用；.css 默认与 HTML 同级（url(images|fonts) 原样有效），也可用
+  --css-dir 指定子目录（自动把 url() 相对路径改写为 ../ 形式）。
 """
 
 import json, re, glob, subprocess, sys, os, base64, hashlib, shutil
@@ -413,6 +422,194 @@ def extract_base64_assets(files, semantic=True):
         print('🖼️  未发现内联 base64 资源，跳过抽离')
 
 
+# ---- 内联 CSS 抽离 (v2.4.0) ---------------------------------------------------
+
+def find_srcdoc_regions(raw):
+    """返回所有 iframe srcdoc 属性值覆盖的 (start,end) 区间。
+
+    区间内出现的 <style> 属于 srcdoc 内嵌文档（是属性值的字符串内容，
+    不是当前文档的样式），抽取文档级 CSS 时必须整体跳过，否则会误把
+    iframe 内部的样式当成当前页面样式抽出来、破坏 iframe 渲染。
+    html.parser 天然把 srcdoc 当作属性值、不会解析其内部标签；这里用
+    字符串扫描给出区间，供线性扫描跳过。
+    """
+    regions = []
+    i = 0
+    n = len(raw)
+    while i < n:
+        m = re.search(r'srcdoc\s*=', raw[i:], re.I)
+        if not m:
+            break
+        base = i + m.end()
+        if base >= n:
+            break
+        q = raw[base]
+        if q not in "\"'":
+            mm = re.search(r"\s|>", raw[base:])
+            if not mm:
+                break
+            seg_end = base + mm.start()
+            regions.append((base, seg_end))
+            i = seg_end
+            continue
+        close = raw.find(q, base + 1)
+        while close != -1 and raw[close - 1] == '\\':
+            close = raw.find(q, close + 1)
+        if close == -1:
+            break
+        regions.append((base + 1, close))
+        i = close + 1
+    return regions
+
+
+def _in_regions(pos, regions):
+    return any(a <= pos < b for a, b in regions)
+
+
+def extract_inline_css(files, css_dir=None, dedup=True):
+    """把 HTML 内联 <style> 抽成独立 .css 文件，并替换为 <link> 引用。
+
+    设计要点（均已在 SingleClone 三文件上验证）：
+    - srcdoc 安全：iframe srcdoc 属性值内嵌的 <style> 跳过，不当文档级样式。
+    - 跳过运行时 CSS：带 data-emotion / data-styled 等属性的 <style> 保留原位
+      （这些通常由 JS 注入/替换，抽走会破坏交互）。
+    - 跨文件去重：块内容按 sha256 计算；出现在多个文件的共享块只写一份
+      shared-<sha12>.css，被各 HTML 以 <link> 引用（省磁盘）。
+    - 路径零风险：默认 .css 与 HTML 同级，url(images/|fonts/) 原样有效；
+      若指定 --css-dir，则把 css 内 url() 改写为 ../images/、../fonts/。
+    - 顺序保持：按原文档顺序生成 <link>，CSS 层叠顺序不变。
+
+    css_dir=None  →  .css 写在每个 HTML 同级目录（url 不动）
+    css_dir='css' →  .css 写在 <htmldir>/css/，link href 加 css/ 前缀，
+                     且 css 内 url(images|fonts) 改写为 ../ 形式
+    dedup=False   →  不做跨文件去重，每块独立成文件（文件名带序号，简单稳）
+    """
+    # ---- Pass 1: 收集每个文件的文档级 <style> 块（srcdoc 已排除） ----
+    file_blocks = {}
+    global_hashes = {}
+    for fname in files:
+        try:
+            raw = open(fname, encoding='utf-8', errors='replace').read()
+        except OSError:
+            continue
+        regions = find_srcdoc_regions(raw)
+        blocks = []
+        i = 0
+        n = len(raw)
+        while i < n:
+            st = raw.find('<style', i)
+            if st == -1:
+                break
+            otag_end = raw.find('>', st)
+            if otag_end == -1:
+                break
+            close = raw.find('</style>', otag_end)
+            if close == -1:
+                break
+            cend = close + len('</style>')
+            if _in_regions(st, regions):
+                i = cend
+                continue  # srcdoc 内嵌，跳过
+            tagtext = raw[st:otag_end + 1]
+            content = raw[otag_end + 1:close]
+            emotion = ('data-emotion' in tagtext.lower()
+                       or 'data-styled' in tagtext.lower())
+            h = hashlib.sha256(content.encode('utf-8')).hexdigest()[:12]
+            blocks.append({'start': st, 'end': cend, 'tag': tagtext,
+                           'content': content, 'emotion': emotion, 'hash': h})
+            i = cend
+        file_blocks[fname] = blocks
+        for b in blocks:
+            global_hashes[b['hash']] = global_hashes.get(b['hash'], 0) + 1
+
+    shared = {h for h, c in global_hashes.items() if c > 1} if dedup else set()
+
+    # ---- Pass 2: 写出 .css 并在 HTML 内替换为 <link> ----
+    grand_extracted = 0
+    grand_bytes = 0
+    written = set()  # (out_dir, cfname, hash) 防止同内容重复写盘
+
+    for fname in files:
+        blocks = file_blocks.get(fname)
+        if not blocks:
+            continue
+        base_dir = os.path.dirname(os.path.abspath(fname))
+        stem = os.path.splitext(os.path.basename(fname))[0]
+        out_dir = os.path.join(base_dir, css_dir) if css_dir else base_dir
+        os.makedirs(out_dir, exist_ok=True)
+        href_prefix = (css_dir.rstrip('/') + '/') if css_dir else ''
+        url_prefix = '../' if css_dir else ''
+
+        raw = open(fname, encoding='utf-8', errors='replace').read()
+        out = []
+        last = 0
+        unique_n = 0
+        file_created = 0
+        file_extracted = 0
+
+        def _rewrite_url(m):
+            inner = m.group(1)
+            p = inner.strip('\'"')
+            if not re.match(r'(images?|fonts?)/', p, re.I):
+                return m.group(0)
+            if p.startswith('../') or p.startswith('./') \
+                    or p.startswith('/') or p.startswith('http'):
+                return m.group(0)
+            np = url_prefix + p
+            if inner != p:
+                q = inner[0]
+                return f'url({q}{np}{q})'
+            return f'url({np})'
+
+        for b in blocks:
+            out.append(raw[last:b['start']])
+            if b['emotion']:
+                out.append(raw[b['start']:b['end']])  # 运行时 CSS，保留原位
+                last = b['end']
+                continue
+            h = b['hash']
+            if h in shared:
+                cfname = f'shared-{h}.css'
+            else:
+                unique_n += 1
+                cfname = f'{stem}-{unique_n}.css'
+            content = b['content']
+            if css_dir:
+                content = re.sub(r'url\(\s*([^)]*?)\s*\)', _rewrite_url,
+                                 content, flags=re.I)
+            key = (out_dir, cfname, h)
+            if key not in written:
+                with open(os.path.join(out_dir, cfname), 'w',
+                          encoding='utf-8') as f:
+                    f.write(content)
+                written.add(key)
+                grand_bytes += len(content.encode('utf-8'))
+                file_created += 1
+            out.append(f'<link rel="stylesheet" href="{href_prefix}{cfname}">')
+            last = b['end']
+            grand_extracted += 1
+            file_extracted += 1
+
+        out.append(raw[last:])
+        new_html = ''.join(out)
+        with open(fname, 'w', encoding='utf-8') as f:
+            f.write(new_html)
+
+        orig = len(raw.encode('utf-8'))
+        new = len(new_html.encode('utf-8'))
+        print(f"🎨 {os.path.basename(fname)}: 抽出 {file_extracted} 个 <style> "
+              f"→ {file_created} 个 .css | HTML {orig:,} → {new:,} bytes "
+              f"(−{orig - new:,})")
+
+    if grand_extracted:
+        loc = f"同级目录" if not css_dir else f"'{css_dir}/' 子目录"
+        print(f"\n📊 内联 CSS 抽离合计: {grand_extracted} 个 <style> → "
+              f"{len(written)} 个 .css 文件, {grand_bytes/1024:.1f} KB "
+              f"(输出位置: {loc})")
+    else:
+        print('🎨  未发现可抽取的内联 <style>（或已全部抽过），跳过')
+
+
 # ---- 主流程 -----------------------------------------------------------------
 
 _PRETTIER_CMD = None
@@ -500,7 +697,8 @@ def try_prettier(files_to_format):
         return False
 
 
-def format_files(targets, semantic=True):
+def format_files(targets, semantic=True, extract_css=False,
+                  css_dir=None, css_dedup=True):
     """主入口：格式化所有目标 HTML 文件"""
     files = collect_files(targets)
     if not files:
@@ -571,6 +769,11 @@ def format_files(targets, semantic=True):
     print('\n🖼️  抽离内联 base64 资源...')
     extract_base64_assets(files, semantic=semantic)
 
+    # Phase 9: 抽离内联 <style> CSS → 独立 .css 文件并替换为 <link>
+    if extract_css:
+        print('\n🎨  抽离内联 CSS 为独立 .css 文件...')
+        extract_inline_css(files, css_dir=css_dir, dedup=css_dedup)
+
     # 输出结果
     print('\n=== 格式化完成 ===')
     for fname in files:
@@ -585,17 +788,38 @@ def format_files(targets, semantic=True):
 if __name__ == '__main__':
     args = sys.argv[1:]
     semantic = True
+    extract_css = False
+    css_dir = None
+    css_dedup = True
     if '--sequential' in args:
         semantic = False
         args.remove('--sequential')
     if '--no-context' in args:
         semantic = False
         args.remove('--no-context')
+    if '--extract-css' in args:
+        extract_css = True
+        args.remove('--extract-css')
+    if '--no-css-dedup' in args:
+        css_dedup = False
+        args.remove('--no-css-dedup')
+    if '--css-dir' in args:
+        idx = args.index('--css-dir')
+        if idx + 1 >= len(args):
+            print('Error: --css-dir 需要一个参数（输出子目录名，如 css）')
+            sys.exit(1)
+        css_dir = args[idx + 1]
+        args.pop(idx)
+        args.pop(idx)
     if not args:
-        print('Usage: python3 format.py [--sequential] <directory|file.html> [...]')
+        print('Usage: python3 format.py [--sequential] [--extract-css] '
+              '[--css-dir <dir>] [--no-css-dedup] <directory|file.html> [...]')
         print('  python3 format.py .                  # 当前目录所有 .html')
         print('  python3 format.py /path/to/dir       # 指定目录')
         print('  python3 format.py a.html b.html      # 指定文件')
         print('  python3 format.py --sequential .     # 关闭语义命名，纯序号')
+        print('  python3 format.py --extract-css .    # 额外抽离内联 CSS 为 .css 文件')
+        print('  python3 format.py --extract-css --css-dir css .  # 抽到 css/ 子目录')
         sys.exit(1)
-    format_files(args, semantic=semantic)
+    format_files(args, semantic=semantic, extract_css=extract_css,
+                 css_dir=css_dir, css_dedup=css_dedup)
