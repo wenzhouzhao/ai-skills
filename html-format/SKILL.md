@@ -6,8 +6,8 @@ description: >
   自动识别文件类型（web-clone JSON 包装 / SingleFile / 普通 minified / DOM 序列化），
   选择最优策略格式化。
 metadata:
-  version: "2.4.0"
-  use_case: 格式化任何单行/压缩的 HTML 文件，并抽离内联 base64 图片/字体（语义命名）与内联 <style> CSS（独立 .css 文件）
+  version: "2.4.1"
+  use_case: 格式化任何单行/压缩的 HTML 文件，并抽离内联 base64 图片/字体（语义命名）与内联 <style> CSS（独立 .css 文件，默认 css/ 子目录）
 ---
 
 # HTML Format · HTML 格式化
@@ -91,16 +91,17 @@ base64 抽离之后，把 HTML 内联的 `<style>` 样式抽成独立 `.css` 文
 - **跨文件去重**：每个块内容按 sha256 计算；出现在多个文件的共享块只写一份
   `shared-<sha12>.css`，被各 HTML 以 `<link>` 引用。仅当前文件独有的块写成
   `<stem>-<n>.css`。
-- **路径零风险**：默认 `.css` 与 HTML **同级**，块内 `url(images/|fonts/)` 原样
-  有效；若用 `--css-dir css` 指定子目录，则自动把 css 内 `url(images|fonts)`
-  改写为 `../images/`、`../fonts/`（已验证改写后路径真实可达）。
+- **路径零风险**：默认 `.css` 写到 **`css/` 子目录**，并自动把 css 内
+  `url(images|fonts)` 改写为 `../images/`、`../fonts/`（已验证改写后路径真实可达）；
+  若用 `--css-dir .` 则退回与 HTML 同级（`url` 原样有效），`--css-dir <其他>` 可指定
+  任意子目录名。
 - **顺序保持**：按原文档顺序生成 `<link>`，CSS 层叠顺序不变。
 - 块内若含 `url(data:image/svg+xml,...)`（URL 编码的内联 SVG）会原样保留在
   `.css` 中，不受影响。
 
 ```bash
-python3 format.py --extract-css .                 # 抽到同级 .css（推荐）
-python3 format.py --extract-css --css-dir css .   # 抽到 css/ 子目录并改写 url()
+python3 format.py --extract-css .                 # 抽到 css/ 子目录（默认）
+python3 format.py --extract-css --css-dir . .     # 退回与 HTML 同级的 .css
 python3 format.py --extract-css --no-css-dedup .  # 关闭跨文件去重，每块独立成文件
 ```
 

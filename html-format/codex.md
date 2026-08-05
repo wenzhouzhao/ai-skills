@@ -70,9 +70,10 @@ python3 /path/to/ai-skills/html-format/format.py /path/to/dir
   files) are written once as `shared-<sha12>.css` and referenced by every file;
   file-unique blocks become `<stem>-<n>.css`. `<iframe srcdoc>`-embedded styles
   are never extracted, and `data-emotion`/`data-styled` runtime-CSS blocks are left
-  inline. By default `.css` files sit next to the HTML (so `url(images/|fonts/)`
-  keeps working); `--css-dir css` moves them into a subdir and rewrites those
-  `url()` paths to `../images/`, `../fonts/`.
+  inline. By default `.css` files go into a `css/` subdir and the script rewrites
+  `url(images|fonts/)` to `../images/`, `../fonts/` (verified reachable);
+  `--css-dir .` keeps them next to the HTML (url unchanged), `--css-dir <other>`
+  picks a different subdir.
 - **Never rely on bare `npx prettier`**: npx re-resolves the latest version from the
   registry on every run, so a cached prettier gets re-downloaded and the command
   hangs (or is killed) offline. `resolve_prettier()` handles this; the chosen

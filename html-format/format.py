@@ -21,8 +21,8 @@ HTML Format - 单行 HTML 格式化工具
   用 html.parser 同源思路的 srcdoc 安全扫描：iframe srcdoc 属性值内嵌的
   <style> 不算文档级样式，绝不误抽；带 data-emotion 等运行时 CSS 的属性
   的 <style> 保留原位不抽。块内容按 sha256 跨文件去重，共享块只存一份被多个
-  HTML 引用；.css 默认与 HTML 同级（url(images|fonts) 原样有效），也可用
-  --css-dir 指定子目录（自动把 url() 相对路径改写为 ../ 形式）。
+  HTML 引用；.css 默认写到 css/ 子目录（url(images|fonts) 自动改写为 ../ 形式），
+  也可用 --css-dir 指定其他子目录，或 --css-dir . 退回与 HTML 同级（url 原样有效）。
 """
 
 import json, re, glob, subprocess, sys, os, base64, hashlib, shutil
@@ -811,6 +811,9 @@ if __name__ == '__main__':
         css_dir = args[idx + 1]
         args.pop(idx)
         args.pop(idx)
+    # 默认把 .css 抽到 css/ 子目录（除非显式指定了 --css-dir，含 --css-dir . 退回同级）
+    if extract_css and css_dir is None:
+        css_dir = 'css'
     if not args:
         print('Usage: python3 format.py [--sequential] [--extract-css] '
               '[--css-dir <dir>] [--no-css-dedup] <directory|file.html> [...]')
@@ -818,8 +821,8 @@ if __name__ == '__main__':
         print('  python3 format.py /path/to/dir       # 指定目录')
         print('  python3 format.py a.html b.html      # 指定文件')
         print('  python3 format.py --sequential .     # 关闭语义命名，纯序号')
-        print('  python3 format.py --extract-css .    # 额外抽离内联 CSS 为 .css 文件')
-        print('  python3 format.py --extract-css --css-dir css .  # 抽到 css/ 子目录')
+        print('  python3 format.py --extract-css .    # 额外抽离内联 CSS 到 css/ 子目录')
+        print('  python3 format.py --extract-css --css-dir . .  # 退回与 HTML 同级的 .css')
         sys.exit(1)
     format_files(args, semantic=semantic, extract_css=extract_css,
                  css_dir=css_dir, css_dedup=css_dedup)
