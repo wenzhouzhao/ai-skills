@@ -17,7 +17,7 @@ HTML Format - 单行 HTML 格式化工具
 
 附加能力 (v2.4.0): 把 HTML 内联的 <style> 样式抽离为独立 .css 文件并替换为
 <link rel="stylesheet"> 引用，从而进一步缩小 HTML 体积、便于样式复用。
-  默认关闭，需显式加 --extract-css 才执行（base64 抽离仍是默认主流程）。
+  默认开启，无需额外参数即执行；如需关闭可加 --no-extract-css（base64 抽离仍是默认主流程）。
   用 html.parser 同源思路的 srcdoc 安全扫描：iframe srcdoc 属性值内嵌的
   <style> 不算文档级样式，绝不误抽；带 data-emotion 等运行时 CSS 的属性
   的 <style> 保留原位不抽。块内容按 sha256 跨文件去重，共享块只存一份被多个
@@ -697,7 +697,7 @@ def try_prettier(files_to_format):
         return False
 
 
-def format_files(targets, semantic=True, extract_css=False,
+def format_files(targets, semantic=True, extract_css=True,
                   css_dir=None, css_dedup=True):
     """主入口：格式化所有目标 HTML 文件"""
     files = collect_files(targets)
@@ -788,7 +788,7 @@ def format_files(targets, semantic=True, extract_css=False,
 if __name__ == '__main__':
     args = sys.argv[1:]
     semantic = True
-    extract_css = False
+    extract_css = True
     css_dir = None
     css_dedup = True
     if '--sequential' in args:
@@ -800,6 +800,9 @@ if __name__ == '__main__':
     if '--extract-css' in args:
         extract_css = True
         args.remove('--extract-css')
+    if '--no-extract-css' in args:
+        extract_css = False
+        args.remove('--no-extract-css')
     if '--no-css-dedup' in args:
         css_dedup = False
         args.remove('--no-css-dedup')
@@ -815,14 +818,15 @@ if __name__ == '__main__':
     if extract_css and css_dir is None:
         css_dir = 'css'
     if not args:
-        print('Usage: python3 format.py [--sequential] [--extract-css] '
+        print('Usage: python3 format.py [--sequential] [--no-extract-css] '
               '[--css-dir <dir>] [--no-css-dedup] <directory|file.html> [...]')
         print('  python3 format.py .                  # 当前目录所有 .html')
         print('  python3 format.py /path/to/dir       # 指定目录')
         print('  python3 format.py a.html b.html      # 指定文件')
         print('  python3 format.py --sequential .     # 关闭语义命名，纯序号')
-        print('  python3 format.py --extract-css .    # 额外抽离内联 CSS 到 css/ 子目录')
-        print('  python3 format.py --extract-css --css-dir . .  # 退回与 HTML 同级的 .css')
+        print('  python3 format.py .                  # 默认抽离内联 CSS 到 css/ 子目录')
+        print('  python3 format.py --no-extract-css . # 关闭内联 CSS 抽离')
+        print('  python3 format.py --css-dir . .      # 退回与 HTML 同级的 .css')
         sys.exit(1)
     format_files(args, semantic=semantic, extract_css=extract_css,
                  css_dir=css_dir, css_dedup=css_dedup)

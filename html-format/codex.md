@@ -64,7 +64,7 @@ python3 /path/to/ai-skills/html-format/format.py /path/to/dir
   Pass `--sequential` to force plain `<prefix>_NNNN` naming.
 - `images/` and `fonts/` directories are created lazily — a site with no fonts
   won't get an empty `fonts/` directory
-- **Inline CSS extraction (`--extract-css`, off by default):** when passed, the
+- **Inline CSS extraction (`--extract-css`, on by default):** the script also pulls
   script also pulls each inline `<style>` out into a standalone `.css` file and
   replaces it with a `<link rel="stylesheet">`. Shared blocks (same sha256 across
   files) are written once as `shared-<sha12>.css` and referenced by every file;

@@ -6,7 +6,7 @@ description: >
   自动识别文件类型（web-clone JSON 包装 / SingleFile / 普通 minified / DOM 序列化），
   选择最优策略格式化。
 metadata:
-  version: "2.4.1"
+  version: "2.4.2"
   use_case: 格式化任何单行/压缩的 HTML 文件，并抽离内联 base64 图片/字体（语义命名）与内联 <style> CSS（独立 .css 文件，默认 css/ 子目录）
 ---
 
@@ -73,9 +73,10 @@ python3 <本skill目录>/format.py a.html b.html
 > 说明：未加引号的属性（如 `<link rel=icon href=data:...>`）也能正确抽取，
 > 正则已规避把后续属性（`sizes=`/`rel=`）误吞为 base64 的历史问题。
 
-## 内联 CSS 抽离（v2.4.0 新增，需 `--extract-css` 开启）
+## 内联 CSS 抽离（v2.4.0 新增，默认开启）
 
-默认**不抽取**（base64 抽离仍是默认主流程）。加 `--extract-css` 时，会在
+默认**抽取**（base64 抽离仍是默认主流程）。加 `--extract-css` 同样显式开启；
+如需关闭可加 `--no-extract-css`。开启时，会在
 base64 抽离之后，把 HTML 内联的 `<style>` 样式抽成独立 `.css` 文件，并在原处
 插入 `<link rel="stylesheet" href="...">` 引用，从而让 HTML 进一步瘦身、样式
 便于复用。在 yuurewards SingleClone 三文件上实测：HTML 由 600KB 缩到 ~42KB
@@ -100,9 +101,10 @@ base64 抽离之后，把 HTML 内联的 `<style>` 样式抽成独立 `.css` 文
   `.css` 中，不受影响。
 
 ```bash
-python3 format.py --extract-css .                 # 抽到 css/ 子目录（默认）
-python3 format.py --extract-css --css-dir . .     # 退回与 HTML 同级的 .css
-python3 format.py --extract-css --no-css-dedup .  # 关闭跨文件去重，每块独立成文件
+python3 format.py .                              # 默认抽到 css/ 子目录
+python3 format.py --no-extract-css .             # 关闭内联 CSS 抽离
+python3 format.py --css-dir . .                  # 退回与 HTML 同级的 .css
+python3 format.py --no-css-dedup .               # 关闭跨文件去重，每块独立成文件
 ```
 
 ## prettier 的定位方式（v2.3.0）
