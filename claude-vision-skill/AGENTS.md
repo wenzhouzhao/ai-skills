@@ -6,6 +6,8 @@ This repo provides a lightweight vision helper for agents without native image i
 
 ## When to use
 
+**Precondition:** only when the current model cannot read images natively. If the model is already multimodal (can see the image itself), do NOT invoke this helper — answer directly. This is purely a fallback for non-vision models.
+
 - Image path: `node vision.js "<absolute image path>" "<prompt>"`
 - Image URL: `node vision.js --url "<image url>" "<prompt>"`
 - Pasted image with no accessible path/URL: `node vision.js --clipboard "<prompt>"`

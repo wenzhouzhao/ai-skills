@@ -341,6 +341,21 @@ function printStats(providers) {
   console.error("=========================================\n");
 }
 
+// 宿主模型已支持原生视觉时，可由以下方式显式关闭本 skill，避免多余的识图调用：
+//   1. 环境变量 VISION_SKIP=1 / true
+//   2. providers.json 顶层 "enabled": false
+function isSkillDisabled() {
+  if (/^(1|true|yes)$/i.test(process.env.VISION_SKIP || "")) return true;
+  const pj = path.join(__dirname, "providers.json");
+  if (fs.existsSync(pj)) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(pj, "utf8"));
+      if (cfg.enabled === false) return true;
+    } catch {}
+  }
+  return false;
+}
+
 async function main() {
   const providers = loadProviders();
   const args = parseArgs();
@@ -359,6 +374,14 @@ async function main() {
   }
   if (args.statsOnly) {
     printStats(providers);
+    return;
+  }
+  // 模型本身已多模态：跳过本 skill（--list/--stats 等只读调试命令不受此限制）
+  if (isSkillDisabled()) {
+    console.error(
+      "SKIPPED: 宿主模型已支持原生视觉（VISION_SKIP=1 或 providers.json enabled=false）。" +
+      "请勿调用本 skill，直接用模型自身能力识图。",
+    );
     return;
   }
 
