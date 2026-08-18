@@ -1,0 +1,5 @@
+# 个人/环境文件，勿提交
+.workbuddy/
+.idea/
+.DS_Store
+node_modules/

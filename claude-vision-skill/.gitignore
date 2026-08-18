@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.bak
+providers.json
+.vision_stats.json
+.workbuddy/
+.DS_Store
+
+# 例外：保留无密钥的范例文件（可被提交）
+!.env.example
+!providers.example.json

@@ -1,0 +1,39 @@
+{
+  "providers": [
+    {
+      "name": "zhipu",
+      "apiKey": "YOUR_API_KEY",
+      "model": "glm-4.6v-flash",
+      "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+      "localImage": true
+    },
+    {
+      "name": "agnes",
+      "apiKey": "YOUR_API_KEY",
+      "model": "agnes-2.5-flash",
+      "baseUrl": "https://apihub.agnes-ai.com/v1",
+      "localImage": false
+    },
+    {
+      "name": "tencent-youtu",
+      "apiKey": "YOUR_API_KEY",
+      "model": "youtu-vita",
+      "baseUrl": "https://tokenhub.tencentmaas.com/v1",
+      "localImage": true
+    },
+    {
+      "name": "tencent-hunyuan-t1",
+      "apiKey": "YOUR_API_KEY",
+      "model": "hunyuan-t1-vision-20250916",
+      "baseUrl": "https://tokenhub.tencentmaas.com/v1",
+      "localImage": true
+    },
+    {
+      "name": "tencent-hy-vision",
+      "apiKey": "YOUR_API_KEY",
+      "model": "hy-vision-2.0-instruct",
+      "baseUrl": "https://tokenhub.tencentmaas.com/v1",
+      "localImage": true
+    }
+  ]
+}
