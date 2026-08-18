@@ -28,6 +28,12 @@ ai-skills/
 │   ├── codex.md              # Codex 入口
 │   ├── scripts/              # 辅助脚本（信息收集）
 │   └── references/           # 参考文档（攻击面分类、二进制 patch 速查、报告模板）
+├── claude-vision-skill/      # 多模态大模型识图（图片→文字），多 provider 智能选举 + 故障转移
+│   ├── SKILL.md              # Claude Code 入口
+│   ├── vision.js             # 核心脚本（OpenAI 兼容 vision API）
+│   ├── providers.example.json  # 多 provider 配置范例（无密钥）
+│   ├── .env.example          # 单 provider 配置范例（无密钥）
+│   └── README.md             # 详细文档
 └── (更多 skills...)
 ```
 
@@ -65,6 +71,18 @@ sudo python3 ishot-security-audit/ishot_security_tester.py auto
 bash macos-app-security-audit/scripts/macos_recon.sh /path/to/Target.app
 ```
 
+### claude-vision-skill
+
+让没有识图能力的模型获得识图能力——把图片发给有 vision 的模型，用文字描述回来。支持多 provider 智能选举（按历史成功率 + 平均耗时）+ 故障转移；公网图片 URL 输入时，优先选中「仅支持公开 URL」的 provider。
+
+```bash
+node claude-vision-skill/vision.js "<图片路径>" "描述这张图"
+# 或公网图片：
+node claude-vision-skill/vision.js --url "https://example.com/img.png" "描述这张图"
+```
+
+> 📌 基于 https://github.com/asuojun/claude-vision-skill 二次开发（已新增多模型选举、故障转移、公网 URL 优先）
+
 ## 安装方式
 
 ### Claude Code
@@ -75,6 +93,7 @@ ln -s $(pwd)/html-format ~/.claude/skills/html-format
 ln -s $(pwd)/web-clone ~/.claude/skills/web-clone
 ln -s $(pwd)/ishot-security-audit ~/.claude/skills/ishot-security-audit
 ln -s $(pwd)/macos-app-security-audit ~/.claude/skills/macos-app-security-audit
+ln -s $(pwd)/claude-vision-skill ~/.claude/skills/claude-vision-skill
 ```
 
 ### Codex (OpenAI)
@@ -85,6 +104,7 @@ cp html-format/codex.md <你的项目>/.codex/commands/html-format.md
 cp web-clone/codex.md <你的项目>/.codex/commands/web-clone.md
 cp ishot-security-audit/codex.md <你的项目>/.codex/commands/ishot-security-audit.md
 cp macos-app-security-audit/codex.md <你的项目>/.codex/commands/macos-app-security-audit.md
+# claude-vision-skill 暂无 Codex 入口（仅提供 SKILL.md / vision.js）
 ```
 
 ## 开发新 Skill
